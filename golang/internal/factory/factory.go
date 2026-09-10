@@ -8,9 +8,9 @@ import (
 )
 
 type MyQueueMiddleware struct {
-	myDial    *amqp.Connection
-	myChannel *amqp.Channel
-	myQueue   amqp.Queue
+	myConnection *amqp.Connection
+	myChannel    *amqp.Channel
+	myQueue      amqp.Queue
 }
 
 func (m MyQueueMiddleware) StartConsuming(callbackFunc func(msg m.Message, ack func(), nack func())) error {
@@ -52,12 +52,62 @@ func CreateQueueMiddleware(queueName string, connectionSettings m.ConnSettings) 
 		return nil, err
 	}
 	aMiddleWare := &MyQueueMiddleware{
-		myDial:  conn,
-		myQueue: queue,
+		myConnection: conn,
+		myQueue:      queue,
 	}
 	return aMiddleWare, nil
 }
 
+type MyExchangeMiddleware struct {
+	myConnection *amqp.Connection
+	myChannel    *amqp.Channel
+	myKeys       []string
+}
+
+func (m MyExchangeMiddleware) StartConsuming(callbackFunc func(msg m.Message, ack func(), nack func())) error {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (m MyExchangeMiddleware) StopConsuming() error {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (m MyExchangeMiddleware) Send(msg m.Message) error {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (m MyExchangeMiddleware) Close() error {
+	//TODO implement me
+	panic("implement me")
+}
+
 func CreateExchangeMiddleware(exchange string, keys []string, connectionSettings m.ConnSettings) (m.Middleware, error) {
-	return nil, nil
+	url := fmt.Sprintf("amqp://%s:%s@%s:%d/", "guest", "guest", connectionSettings.Hostname, connectionSettings.Port)
+	conn, err := amqp.Dial(url)
+	if err != nil {
+		return nil, err
+	}
+	ch, err := conn.Channel()
+	if err != nil {
+		conn.Close()
+		return nil, err
+	}
+	err = ch.ExchangeDeclare(
+		exchange, // name
+		"direct", // type
+		false,    // durability
+		false,    // auto-deleted
+		false,    // internal
+		false,    // no-wait
+		nil,      // arguments
+	)
+	aMiddleware := &MyExchangeMiddleware{
+		myConnection: conn,
+		myChannel:    ch,
+		myKeys:       keys,
+	}
+	return aMiddleware, nil
 }
