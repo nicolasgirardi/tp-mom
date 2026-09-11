@@ -2,11 +2,42 @@ package factory
 
 import (
 	"fmt"
+	"io"
 	"sync"
 
 	m "github.com/7574-sistemas-distribuidos/tp-mom/golang/internal/middleware"
 	amqp "github.com/rabbitmq/amqp091-go"
 )
+
+func ConsumeFromQueue(msgs <-chan amqp.Delivery, callbackFunc func(msg m.Message, ack func(), nack func()), tag *SecureString) {
+	firstMessage := true
+	for msg := range msgs {
+		if firstMessage {
+			tag.Store(msg.ConsumerTag)
+		}
+		firstMessage = false
+		message := m.Message{Body: string(msg.Body)}
+		ack := func() { _ = msg.Ack(false) }
+		nack := func() { _ = msg.Nack(false, true) }
+		callbackFunc(message, ack, nack)
+	}
+}
+
+func CloseResources(resources ...io.Closer) error {
+	var errors []error
+	for _, resource := range resources {
+		if resource == nil {
+			continue
+		}
+		if err := resource.Close(); err != nil {
+			errors = append(errors, err)
+		}
+	}
+	if len(errors) > 0 {
+		return m.ErrMessageMiddlewareClose
+	}
+	return nil
+}
 
 type SecureString struct {
 	text string
@@ -62,17 +93,7 @@ func (mQ *MyQueueMiddleware) StartConsuming(callbackFunc func(msg m.Message, ack
 	if err != nil {
 		return m.ErrMessageMiddlewareDisconnected
 	}
-	firstMessage := true
-	for msg := range msgs {
-		if firstMessage {
-			mQ.myConsumerTag.Store(msg.ConsumerTag)
-		}
-		firstMessage = false
-		message := m.Message{Body: string(msg.Body)}
-		ack := func() { _ = msg.Ack(false) }
-		nack := func() { _ = msg.Nack(false, true) }
-		callbackFunc(message, ack, nack)
-	}
+	ConsumeFromQueue(msgs, callbackFunc, mQ.myConsumerTag)
 	mQ.mutex.Lock()
 	defer mQ.mutex.Unlock()
 	if mQ.consuming {
@@ -105,12 +126,7 @@ func (mQ *MyQueueMiddleware) Send(msg m.Message) error {
 }
 
 func (mQ *MyQueueMiddleware) Close() error {
-	errC := mQ.myConnection.Close()
-	errQ := mQ.myChannel.Close()
-	if errC != nil || errQ != nil {
-		return m.ErrMessageMiddlewareClose
-	}
-	return nil
+	return CloseResources(mQ.myChannel, mQ.myConnection)
 }
 
 func CreateQueueMiddleware(queueName string, connectionSettings m.ConnSettings) (m.Middleware, error) {
@@ -121,15 +137,20 @@ func CreateQueueMiddleware(queueName string, connectionSettings m.ConnSettings) 
 	}
 	channel, err := conn.Channel()
 	if err != nil {
-		conn.Close()
+		er := CloseResources(conn)
+		if er != nil {
+			return nil, er
+		}
 		return nil, err
 	}
 	queue, err := channel.QueueDeclare(queueName, true, false, false, false, amqp.Table{
 		amqp.QueueTypeArg: amqp.QueueTypeQuorum,
 	})
 	if err != nil {
-		conn.Close()
-		channel.Close()
+		er := CloseResources(channel, conn)
+		if er != nil {
+			return nil, er
+		}
 		return nil, err
 	}
 	aMiddleWare := &MyQueueMiddleware{
@@ -164,17 +185,7 @@ func (mE *MyExchangeMiddleware) StartConsuming(callbackFunc func(msg m.Message, 
 	if er != nil {
 		return m.ErrMessageMiddlewareDisconnected
 	}
-	firstMessage := true
-	for msg := range msgs {
-		if firstMessage {
-			mE.myConsumerTag.Store(msg.ConsumerTag)
-		}
-		firstMessage = false
-		message := m.Message{Body: string(msg.Body)}
-		ack := func() { _ = msg.Ack(false) }
-		nack := func() { _ = msg.Nack(false, true) }
-		callbackFunc(message, ack, nack)
-	}
+	ConsumeFromQueue(msgs, callbackFunc, mE.myConsumerTag)
 	mE.mutex.Lock()
 	defer mE.mutex.Unlock()
 	if mE.consuming {
@@ -209,12 +220,7 @@ func (mE *MyExchangeMiddleware) Send(msg m.Message) error {
 }
 
 func (mE *MyExchangeMiddleware) Close() error {
-	errC := mE.myConnection.Close()
-	errQ := mE.myChannel.Close()
-	if errC != nil || errQ != nil {
-		return m.ErrMessageMiddlewareClose
-	}
-	return nil
+	return CloseResources(mE.myChannel, mE.myConnection)
 }
 
 func CreateExchangeMiddleware(exchange string, keys []string, connectionSettings m.ConnSettings) (m.Middleware, error) {
@@ -225,7 +231,10 @@ func CreateExchangeMiddleware(exchange string, keys []string, connectionSettings
 	}
 	ch, err := conn.Channel()
 	if err != nil {
-		conn.Close()
+		er := CloseResources(conn)
+		if er != nil {
+			return nil, er
+		}
 		return nil, err
 	}
 	err = ch.ExchangeDeclare(
@@ -238,8 +247,10 @@ func CreateExchangeMiddleware(exchange string, keys []string, connectionSettings
 		nil,
 	)
 	if err != nil {
-		conn.Close()
-		ch.Close()
+		er := CloseResources(ch, conn)
+		if er != nil {
+			return nil, er
+		}
 		return nil, err
 	}
 	queue, err := ch.QueueDeclare(
@@ -251,15 +262,19 @@ func CreateExchangeMiddleware(exchange string, keys []string, connectionSettings
 		nil,   // arguments
 	)
 	if err != nil {
-		ch.Close()
-		conn.Close()
+		er := CloseResources(ch, conn)
+		if er != nil {
+			return nil, er
+		}
 		return nil, m.ErrMessageMiddlewareDisconnected
 	}
 	for _, key := range keys {
 		err = ch.QueueBind(queue.Name, key, exchange, false, nil)
 		if err != nil {
-			conn.Close()
-			ch.Close()
+			er := CloseResources(conn)
+			if er != nil {
+				return nil, er
+			}
 			return nil, m.ErrMessageMiddlewareMessage
 		}
 	}
