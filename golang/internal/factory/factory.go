@@ -1,11 +1,9 @@
 package factory
 
 import (
-	"context"
 	"fmt"
 	"sync"
 	"sync/atomic"
-	"time"
 
 	m "github.com/7574-sistemas-distribuidos/tp-mom/golang/internal/middleware"
 	amqp "github.com/rabbitmq/amqp091-go"
@@ -47,6 +45,10 @@ type MyQueueMiddleware struct {
 
 func (mQ *MyQueueMiddleware) StartConsuming(callbackFunc func(msg m.Message, ack func(), nack func())) error {
 	mQ.mutex.Lock()
+	if mQ.consuming {
+		mQ.mutex.Unlock()
+		return nil
+	}
 	mQ.consuming = true
 	mQ.mutex.Unlock()
 	msgs, err := mQ.myChannel.Consume(
@@ -96,9 +98,7 @@ func (mQ *MyQueueMiddleware) StopConsuming() error {
 }
 
 func (mQ *MyQueueMiddleware) Send(msg m.Message) error {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	err := mQ.myChannel.PublishWithContext(ctx, "", mQ.myQueue.Name, false, false, amqp.Publishing{ContentType: "text/plain", Body: []byte(msg.Body)})
+	err := mQ.myChannel.Publish("", mQ.myQueue.Name, false, false, amqp.Publishing{ContentType: "text/plain", Body: []byte(msg.Body)})
 	if err != nil {
 		return m.ErrMessageMiddlewareDisconnected
 	}
