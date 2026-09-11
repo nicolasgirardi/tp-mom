@@ -49,6 +49,8 @@ func NewSecureString(text string) *SecureString {
 }
 
 func (s *SecureString) Compare(text string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	return s.text == text
 }
 
