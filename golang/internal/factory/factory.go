@@ -131,6 +131,10 @@ func (mQ *MyQueueMiddleware) Send(msg m.Message) error {
 }
 
 func (mQ *MyQueueMiddleware) Close() error {
+	err := mQ.StopConsuming()
+	if err != nil {
+		return err
+	}
 	return CloseResources(mQ.myChannel, mQ.myConnection)
 }
 
@@ -228,6 +232,10 @@ func (mE *MyExchangeMiddleware) Send(msg m.Message) error {
 }
 
 func (mE *MyExchangeMiddleware) Close() error {
+	err := mE.StopConsuming()
+	if err != nil {
+		return err
+	}
 	return CloseResources(mE.myChannel, mE.myConnection)
 }
 
