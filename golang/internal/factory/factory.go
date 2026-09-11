@@ -109,6 +109,7 @@ func (mQ *MyQueueMiddleware) StartConsuming(callbackFunc func(msg m.Message, ack
 func (mQ *MyQueueMiddleware) StopConsuming() error {
 	mQ.mutex.Lock()
 	if !mQ.consuming {
+		mQ.mutex.Unlock()
 		return nil
 	}
 	consumerTag := mQ.myConsumerTag.Text()
