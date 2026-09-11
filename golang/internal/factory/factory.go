@@ -99,6 +99,7 @@ func (mQ *MyQueueMiddleware) StartConsuming(callbackFunc func(msg m.Message, ack
 	mQ.mutex.Lock()
 	defer mQ.mutex.Unlock()
 	if mQ.consuming {
+		mQ.consuming = false
 		return m.ErrMessageMiddlewareDisconnected
 	}
 	return nil
@@ -191,6 +192,7 @@ func (mE *MyExchangeMiddleware) StartConsuming(callbackFunc func(msg m.Message, 
 	mE.mutex.Lock()
 	defer mE.mutex.Unlock()
 	if mE.consuming {
+		mE.consuming = false
 		return m.ErrMessageMiddlewareDisconnected
 	}
 	return nil
