@@ -82,7 +82,6 @@ func (mQ *MyQueueMiddleware) StartConsuming(callbackFunc func(msg m.Message, ack
 		return nil
 	}
 	mQ.consuming = true
-	mQ.mutex.Unlock()
 	msgs, err := mQ.myChannel.Consume(
 		mQ.myQueue.Name, // queue
 		mQ.myConsumerTag.Text(),
@@ -93,8 +92,10 @@ func (mQ *MyQueueMiddleware) StartConsuming(callbackFunc func(msg m.Message, ack
 		nil,
 	)
 	if err != nil {
+		mQ.mutex.Unlock()
 		return m.ErrMessageMiddlewareDisconnected
 	}
+	mQ.mutex.Unlock()
 	ConsumeFromQueue(msgs, callbackFunc, mQ.myConsumerTag)
 	mQ.mutex.Lock()
 	defer mQ.mutex.Unlock()
@@ -106,13 +107,13 @@ func (mQ *MyQueueMiddleware) StartConsuming(callbackFunc func(msg m.Message, ack
 }
 
 func (mQ *MyQueueMiddleware) StopConsuming() error {
+	mQ.mutex.Lock()
 	if !mQ.consuming {
 		return nil
 	}
 	consumerTag := mQ.myConsumerTag.Text()
-	mQ.mutex.Lock()
-	defer mQ.mutex.Unlock()
 	mQ.consuming = false
+	mQ.mutex.Unlock()
 	err := mQ.myChannel.Cancel(consumerTag, false)
 	if err != nil {
 		return m.ErrMessageMiddlewareDisconnected
@@ -178,16 +179,17 @@ type MyExchangeMiddleware struct {
 }
 
 func (mE *MyExchangeMiddleware) StartConsuming(callbackFunc func(msg m.Message, ack func(), nack func())) error {
-
 	mE.mutex.Lock()
 	if mE.consuming {
 		mE.mutex.Unlock()
 		return nil
 	}
 	msgs, er := mE.myChannel.Consume(mE.myQueue.Name, "", false, false, false, false, nil)
+
 	if er != nil {
 		return m.ErrMessageMiddlewareDisconnected
 	}
+	mE.mutex.Unlock()
 	ConsumeFromQueue(msgs, callbackFunc, mE.myConsumerTag)
 	mE.mutex.Lock()
 	defer mE.mutex.Unlock()
@@ -199,13 +201,14 @@ func (mE *MyExchangeMiddleware) StartConsuming(callbackFunc func(msg m.Message, 
 }
 
 func (mE *MyExchangeMiddleware) StopConsuming() error {
+	mE.mutex.Lock()
 	if !mE.consuming {
+		mE.mutex.Unlock()
 		return nil
 	}
 	consumerTag := mE.myConsumerTag.Text()
-	mE.mutex.Lock()
-	defer mE.mutex.Unlock()
 	mE.consuming = false
+	mE.mutex.Unlock()
 	err := mE.myChannel.Cancel(consumerTag, false)
 	if err != nil {
 		return m.ErrMessageMiddlewareDisconnected
