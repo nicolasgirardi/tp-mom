@@ -3,7 +3,6 @@ package factory
 import (
 	"fmt"
 	"sync"
-	"sync/atomic"
 
 	m "github.com/7574-sistemas-distribuidos/tp-mom/golang/internal/middleware"
 	amqp "github.com/rabbitmq/amqp091-go"
@@ -130,10 +129,9 @@ func CreateQueueMiddleware(queueName string, connectionSettings m.ConnSettings) 
 	})
 	if err != nil {
 		conn.Close()
+		channel.Close()
 		return nil, err
 	}
-	var consuming atomic.Bool
-	consuming.Store(false)
 	aMiddleWare := &MyQueueMiddleware{
 		myConnection:  conn,
 		myChannel:     channel,
@@ -145,29 +143,75 @@ func CreateQueueMiddleware(queueName string, connectionSettings m.ConnSettings) 
 }
 
 type MyExchangeMiddleware struct {
-	myConnection *amqp.Connection
-	myChannel    *amqp.Channel
-	myKeys       []string
+	myConnection   *amqp.Connection
+	myChannel      *amqp.Channel
+	myQueue        amqp.Queue
+	myExchangeName string
+	myKeys         []string
+	myConsumerTag  *SecureString
+	consuming      bool
+	mutex          sync.Mutex
 }
 
 func (mE *MyExchangeMiddleware) StartConsuming(callbackFunc func(msg m.Message, ack func(), nack func())) error {
-	//TODO implement me
-	panic("implement me")
+
+	mE.mutex.Lock()
+	if mE.consuming {
+		mE.mutex.Unlock()
+		return nil
+	}
+	msgs, er := mE.myChannel.Consume(mE.myQueue.Name, "", false, false, false, false, nil)
+	if er != nil {
+		return m.ErrMessageMiddlewareDisconnected
+	}
+	firstMessage := true
+	for msg := range msgs {
+		if firstMessage {
+			mE.myConsumerTag.Store(msg.ConsumerTag)
+		}
+		firstMessage = false
+		message := m.Message{Body: string(msg.Body)}
+		ack := func() { _ = msg.Ack(false) }
+		nack := func() { _ = msg.Nack(false, true) }
+		callbackFunc(message, ack, nack)
+	}
+	mE.mutex.Lock()
+	defer mE.mutex.Unlock()
+	if mE.consuming {
+		return m.ErrMessageMiddlewareDisconnected
+	}
+	return nil
 }
 
 func (mE *MyExchangeMiddleware) StopConsuming() error {
-	//TODO implement me
+	if !mE.consuming {
+		return nil
+	}
+	consumerTag := mE.myConsumerTag.Text()
+	mE.mutex.Lock()
+	defer mE.mutex.Unlock()
+	mE.consuming = false
+	err := mE.myChannel.Cancel(consumerTag, false)
+	if err != nil {
+		return m.ErrMessageMiddlewareDisconnected
+	}
 	panic("implement me")
 }
 
 func (mE *MyExchangeMiddleware) Send(msg m.Message) error {
-	//TODO implement me
-	panic("implement me")
+	for _, key := range mE.myKeys {
+		err := mE.myChannel.Publish(mE.myExchangeName, key, false, false, amqp.Publishing{ContentType: "text/plain", Body: []byte(msg.Body)})
+		if err != nil {
+			return m.ErrMessageMiddlewareDisconnected
+		}
+	}
+	return nil
 }
 
 func (mE *MyExchangeMiddleware) Close() error {
-	err := mE.myConnection.Close()
-	if err != nil {
+	errC := mE.myConnection.Close()
+	errQ := mE.myChannel.Close()
+	if errC != nil || errQ != nil {
 		return m.ErrMessageMiddlewareClose
 	}
 	return nil
@@ -185,18 +229,48 @@ func CreateExchangeMiddleware(exchange string, keys []string, connectionSettings
 		return nil, err
 	}
 	err = ch.ExchangeDeclare(
-		exchange, // name
-		"direct", // type
-		false,    // durability
-		false,    // auto-deleted
-		false,    // internal
-		false,    // no-wait
-		nil,      // arguments
+		exchange,
+		"direct",
+		false,
+		false,
+		false,
+		false,
+		nil,
 	)
+	if err != nil {
+		conn.Close()
+		ch.Close()
+		return nil, err
+	}
+	queue, err := ch.QueueDeclare(
+		"",    // name
+		false, // durability
+		true,  // delete when unused
+		true,  // exclusive
+		false, // no-wait
+		nil,   // arguments
+	)
+	if err != nil {
+		ch.Close()
+		conn.Close()
+		return nil, m.ErrMessageMiddlewareDisconnected
+	}
+	for _, key := range keys {
+		err = ch.QueueBind(queue.Name, key, exchange, false, nil)
+		if err != nil {
+			conn.Close()
+			ch.Close()
+			return nil, m.ErrMessageMiddlewareMessage
+		}
+	}
 	aMiddleware := &MyExchangeMiddleware{
-		myConnection: conn,
-		myChannel:    ch,
-		myKeys:       keys,
+		myConnection:   conn,
+		myChannel:      ch,
+		myQueue:        queue,
+		myExchangeName: exchange,
+		myKeys:         keys,
+		myConsumerTag:  NewSecureString(""),
+		consuming:      false,
 	}
 	return aMiddleware, nil
 }
