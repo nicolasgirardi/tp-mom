@@ -83,7 +83,7 @@ func (mQ *MyQueueMiddleware) StartConsuming(callbackFunc func(msg m.Message, ack
 	}
 	mQ.consuming = true
 	msgs, err := mQ.myChannel.Consume(
-		mQ.myQueue.Name, // queue
+		mQ.myQueue.Name,
 		mQ.myConsumerTag.Text(),
 		false,
 		false,
@@ -270,12 +270,12 @@ func CreateExchangeMiddleware(exchange string, keys []string, connectionSettings
 		return nil, m.ErrMessageMiddlewareDisconnected
 	}
 	queue, err := ch.QueueDeclare(
-		"",    // name
-		false, // durability
-		true,  // delete when unused
-		true,  // exclusive
-		false, // no-wait
-		nil,   // arguments
+		"",
+		false,
+		true,
+		true,
+		false,
+		nil,
 	)
 	if err != nil {
 		er := CloseResources(ch, conn)
