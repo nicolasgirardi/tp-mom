@@ -142,7 +142,7 @@ func CreateQueueMiddleware(queueName string, connectionSettings m.ConnSettings) 
 	url := fmt.Sprintf("amqp://%s:%s@%s:%d/", "guest", "guest", connectionSettings.Hostname, connectionSettings.Port)
 	conn, err := amqp.Dial(url)
 	if err != nil {
-		return nil, err
+		return nil, m.ErrMessageMiddlewareDisconnected
 	}
 	channel, err := conn.Channel()
 	if err != nil {
@@ -150,7 +150,7 @@ func CreateQueueMiddleware(queueName string, connectionSettings m.ConnSettings) 
 		if er != nil {
 			return nil, er
 		}
-		return nil, err
+		return nil, m.ErrMessageMiddlewareDisconnected
 	}
 	queue, err := channel.QueueDeclare(queueName, true, false, false, false, amqp.Table{
 		amqp.QueueTypeArg: amqp.QueueTypeQuorum,
@@ -160,7 +160,7 @@ func CreateQueueMiddleware(queueName string, connectionSettings m.ConnSettings) 
 		if er != nil {
 			return nil, er
 		}
-		return nil, err
+		return nil, m.ErrMessageMiddlewareDisconnected
 	}
 	aMiddleWare := &MyQueueMiddleware{
 		myConnection:  conn,
@@ -243,7 +243,7 @@ func CreateExchangeMiddleware(exchange string, keys []string, connectionSettings
 	url := fmt.Sprintf("amqp://%s:%s@%s:%d/", "guest", "guest", connectionSettings.Hostname, connectionSettings.Port)
 	conn, err := amqp.Dial(url)
 	if err != nil {
-		return nil, err
+		return nil, m.ErrMessageMiddlewareDisconnected
 	}
 	ch, err := conn.Channel()
 	if err != nil {
@@ -251,7 +251,7 @@ func CreateExchangeMiddleware(exchange string, keys []string, connectionSettings
 		if er != nil {
 			return nil, er
 		}
-		return nil, err
+		return nil, m.ErrMessageMiddlewareDisconnected
 	}
 	err = ch.ExchangeDeclare(
 		exchange,
@@ -267,7 +267,7 @@ func CreateExchangeMiddleware(exchange string, keys []string, connectionSettings
 		if er != nil {
 			return nil, er
 		}
-		return nil, err
+		return nil, m.ErrMessageMiddlewareDisconnected
 	}
 	queue, err := ch.QueueDeclare(
 		"",    // name
