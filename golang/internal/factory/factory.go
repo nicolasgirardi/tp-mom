@@ -9,7 +9,7 @@ import (
 	amqp "github.com/rabbitmq/amqp091-go"
 )
 
-func ConsumeFromQueue(msgs <-chan amqp.Delivery, callbackFunc func(msg m.Message, ack func(), nack func()), tag *SecureString) {
+func ConsumeFromQueue(msgs <-chan amqp.Delivery, callbackFunc func(msg m.Message, ack func(), nack func()), tag *SyncString) {
 	firstMessage := true
 	for msg := range msgs {
 		if firstMessage {
@@ -39,28 +39,28 @@ func CloseResources(resources ...io.Closer) error {
 	return nil
 }
 
-type SecureString struct {
+type SyncString struct {
 	text string
 	mu   sync.Mutex
 }
 
-func NewSecureString(text string) *SecureString {
-	return &SecureString{text: text}
+func NewSecureString(text string) *SyncString {
+	return &SyncString{text: text}
 }
 
-func (s *SecureString) Compare(text string) bool {
+func (s *SyncString) Compare(text string) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.text == text
 }
 
-func (s *SecureString) Text() string {
+func (s *SyncString) Text() string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.text
 }
 
-func (s *SecureString) Store(newText string) {
+func (s *SyncString) Store(newText string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.text = newText
@@ -70,7 +70,7 @@ type MyQueueMiddleware struct {
 	myConnection  *amqp.Connection
 	myChannel     *amqp.Channel
 	myQueue       amqp.Queue
-	myConsumerTag *SecureString
+	myConsumerTag *SyncString
 	consuming     bool
 	mutex         sync.Mutex
 }
@@ -108,17 +108,18 @@ func (mQ *MyQueueMiddleware) StartConsuming(callbackFunc func(msg m.Message, ack
 
 func (mQ *MyQueueMiddleware) StopConsuming() error {
 	mQ.mutex.Lock()
-	if !mQ.consuming {
+	consumerTag := mQ.myConsumerTag.Text()
+	if !mQ.consuming || consumerTag == "" {
 		mQ.mutex.Unlock()
 		return nil
 	}
-	consumerTag := mQ.myConsumerTag.Text()
 	mQ.consuming = false
 	mQ.mutex.Unlock()
 	err := mQ.myChannel.Cancel(consumerTag, false)
 	if err != nil {
 		return m.ErrMessageMiddlewareDisconnected
 	}
+	mQ.myConsumerTag.Store("")
 	return nil
 }
 
@@ -153,7 +154,7 @@ func CreateQueueMiddleware(queueName string, connectionSettings m.ConnSettings) 
 		return nil, m.ErrMessageMiddlewareDisconnected
 	}
 	queue, err := channel.QueueDeclare(queueName, true, false, false, false, amqp.Table{
-		amqp.QueueTypeArg: amqp.QueueTypeQuorum,
+		amqp.QueueTypeArg: amqp.QueueTypeClassic,
 	})
 	if err != nil {
 		er := CloseResources(channel, conn)
@@ -178,7 +179,7 @@ type MyExchangeMiddleware struct {
 	myQueue        amqp.Queue
 	myExchangeName string
 	myKeys         []string
-	myConsumerTag  *SecureString
+	myConsumerTag  *SyncString
 	consuming      bool
 	mutex          sync.Mutex
 }
@@ -194,6 +195,7 @@ func (mE *MyExchangeMiddleware) StartConsuming(callbackFunc func(msg m.Message, 
 	if er != nil {
 		return m.ErrMessageMiddlewareDisconnected
 	}
+	mE.consuming = true
 	mE.mutex.Unlock()
 	ConsumeFromQueue(msgs, callbackFunc, mE.myConsumerTag)
 	mE.mutex.Lock()
@@ -218,7 +220,7 @@ func (mE *MyExchangeMiddleware) StopConsuming() error {
 	if err != nil {
 		return m.ErrMessageMiddlewareDisconnected
 	}
-	panic("implement me")
+	return nil
 }
 
 func (mE *MyExchangeMiddleware) Send(msg m.Message) error {
